@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 Device</title>
+  <link rel="stylesheet" href="/pico.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <nav class="container-fluid">
+    <ul>
+      <li><strong id="nav-title">ESP32 Device</strong></li>
+    </ul>
+    <ul>
+      <li><button id="burger" class="outline" aria-label="Menu">☰</button></li>
+    </ul>
+  </nav>
+
+  <div id="nav-backdrop" class="nav-backdrop hidden" aria-hidden="true"></div>
+  <aside id="nav-drawer" class="nav-drawer" aria-hidden="true">
+    <ul>
+      <li><a href="#" data-page="home">Home</a></li>
+      <li><a href="#" data-page="wifi">WiFi Config</a></li>
+    </ul>
+  </aside>
+
+  <main class="container">
+    <section id="page-home">
+      <hgroup>
+        <h2>Dashboard</h2>
+        <p id="status-bar">Connecting…</p>
+      </hgroup>
+
+      <article>
+        <header><strong>LED Control</strong></header>
+        <div class="led-controls">
+          <label>
+            Colour
+            <input type="color" id="led-color" value="#000000">
+          </label>
+          <button id="led-toggle" class="outline">Turn On</button>
+        </div>
+      </article>
+
+      <article>
+        <header><strong>Event Log</strong></header>
+        <div id="event-log" class="event-log"></div>
+      </article>
+    </section>
+
+    <section id="page-wifi" class="hidden">
+      <hgroup>
+        <h2>WiFi Config</h2>
+        <p>Manage saved networks</p>
+      </hgroup>
+
+      <article>
+        <header><strong>Saved Networks</strong></header>
+        <div id="wifi-creds-list"><em>Loading…</em></div>
+      </article>
+
+      <article>
+        <header><strong>Add Network</strong></header>
+        <form id="wifi-add-form">
+          <label>SSID <input type="text" id="wifi-ssid" required placeholder="Network name"></label>
+          <label>Password <input type="password" id="wifi-pwd" placeholder="Leave blank for open network"></label>
+          <button type="submit">Save</button>
+        </form>
+      </article>
+
+      <button id="wifi-connect-btn" class="outline">Connect Now</button>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

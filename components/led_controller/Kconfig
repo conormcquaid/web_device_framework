@@ -1,0 +1,7 @@
+menu "LED Controller"
+config LED_CONTROLLER_GPIO
+    int "WS2812 data GPIO number"
+    default 48
+    help
+        GPIO pin connected to the WS2812 DIN line.
+endmenu

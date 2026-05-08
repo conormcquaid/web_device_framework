@@ -1,0 +1,3 @@
+dependencies:
+  joltwallet/esp_littlefs: ">=1.14.0"
+  idf: ">=5.0.0"

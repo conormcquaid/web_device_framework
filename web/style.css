@@ -1,0 +1,49 @@
+/* Layout glue — all theme/color/typography from pico.min.css */
+
+.hidden { display: none !important; }
+
+/* Nav drawer */
+.nav-drawer {
+  position: fixed;
+  top: 0;
+  left: -260px;
+  width: 240px;
+  height: 100%;
+  background: var(--card-background-color, #fff);
+  box-shadow: 2px 0 8px rgba(0,0,0,.2);
+  padding: 1rem;
+  transition: left .25s ease;
+  z-index: 200;
+}
+.nav-drawer.open { left: 0; }
+.nav-drawer ul { list-style: none; padding: 0; margin-top: 3rem; }
+.nav-drawer li { margin: .5rem 0; }
+.nav-drawer a { text-decoration: none; font-size: 1.1rem; }
+
+/* Backdrop */
+.nav-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.35);
+  z-index: 100;
+}
+
+/* LED controls */
+.led-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.led-controls label { margin: 0; }
+#led-color { height: 2.5rem; width: 4rem; padding: .1rem .2rem; cursor: pointer; }
+
+/* Event log */
+.event-log {
+  max-height: 240px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: .85rem;
+  line-height: 1.4;
+}
+.event-log p { margin: 0; border-bottom: 1px solid var(--muted-border-color, #eee); padding: .2rem 0; }
