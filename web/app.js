@@ -115,6 +115,29 @@ function connectWS() {
 
 connectWS();
 
+/* ── Throttle ─────────────────────────────────────────────────────────── */
+
+function throttle(fn, ms) {
+  let last = 0, timer = null;
+  return function (...args) {
+    const now = Date.now();
+    const remaining = ms - (now - last);
+    if (remaining <= 0) {
+      clearTimeout(timer);
+      timer = null;
+      last = now;
+      fn.apply(this, args);
+    } else {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        last = Date.now();
+        timer = null;
+        fn.apply(this, args);
+      }, remaining);
+    }
+  };
+}
+
 /* ── LED controls ─────────────────────────────────────────────────────── */
 
 const ledColor      = document.getElementById('led-color');
@@ -180,21 +203,28 @@ async function loadLedState() {
   } catch (e) { /* ignore */ }
 }
 
-ledColor.addEventListener('input', sendLedColor);
-
-ledW.addEventListener('input', () => {
-  ledWValue.textContent = ledW.value;
-  sendLedColor();
-});
-
-ledBrightness.addEventListener('input', async () => {
+async function sendBrightness() {
   const brightness = parseInt(ledBrightness.value, 10);
-  ledBrValue.textContent = brightness;
   await apiFetch('/api/led', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ brightness }),
   });
+}
+
+const sendLedColorThrottled  = throttle(sendLedColor,  80);
+const sendBrightnessThrottled = throttle(sendBrightness, 80);
+
+ledColor.addEventListener('input', sendLedColorThrottled);
+
+ledW.addEventListener('input', () => {
+  ledWValue.textContent = ledW.value;
+  sendLedColorThrottled();
+});
+
+ledBrightness.addEventListener('input', () => {
+  ledBrValue.textContent = ledBrightness.value;
+  sendBrightnessThrottled();
 });
 
 ledToggle.addEventListener('click', async () => {
