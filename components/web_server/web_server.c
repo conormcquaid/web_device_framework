@@ -194,10 +194,21 @@ static esp_err_t static_handler(httpd_req_t *req) {
         return ESP_OK;
     }
     httpd_resp_set_type(req, mime_for(fpath));
-    char buf[512];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
-        httpd_resp_send_chunk(req, buf, (ssize_t)n);
+    httpd_resp_set_hdr(req, "Cache-Control", "max-age=3600");
+
+    /* Heap-allocate the read buffer — 4 KB keeps chunk count low without
+       risking a stack overflow inside the httpd task (default 4 KB stack). */
+    char *buf = malloc(4096);
+    if (buf) {
+        size_t n;
+        while ((n = fread(buf, 1, 4096, f)) > 0)
+            httpd_resp_send_chunk(req, buf, (ssize_t)n);
+        free(buf);
+    } else {
+        char tmp[512];
+        size_t n;
+        while ((n = fread(tmp, 1, sizeof(tmp), f)) > 0)
+            httpd_resp_send_chunk(req, tmp, (ssize_t)n);
     }
     fclose(f);
     httpd_resp_send_chunk(req, NULL, 0);
