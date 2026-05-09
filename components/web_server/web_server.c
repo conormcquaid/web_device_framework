@@ -5,6 +5,7 @@
 #include "esp_http_server.h"
 #include "esp_littlefs.h"
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -107,6 +108,7 @@ static esp_err_t static_handler(httpd_req_t *req) {
 
     FILE *f = fopen(fpath, "r");
     if (!f) {
+        ESP_LOGW(TAG, "404: %s", fpath);
         httpd_resp_send_404(req);
         return ESP_OK;
     }
@@ -187,10 +189,22 @@ static esp_err_t api_info_handler(httpd_req_t *req) {
     char device_name[64];
     config_get_str("device_name", device_name, sizeof(device_name));
 
+    char ip_str[16]    = "N/A";
+    char state_str[16] = "ap_mode";
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (sta) {
+        esp_netif_ip_info_t ip_info = {0};
+        if (esp_netif_get_ip_info(sta, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
+            snprintf(ip_str, sizeof(ip_str), IPSTR, IP2STR(&ip_info.ip));
+            strlcpy(state_str, "connected", sizeof(state_str));
+        }
+    }
+
     char buf[256];
     snprintf(buf, sizeof(buf),
-             "{\"device_name\":\"%s\",\"free_heap\":%lu,\"uptime_s\":%lld}",
-             device_name,
+             "{\"device_name\":\"%s\",\"wifi_state\":\"%s\",\"ip\":\"%s\","
+             "\"free_heap\":%lu,\"uptime_s\":%lld}",
+             device_name, state_str, ip_str,
              (unsigned long)esp_get_free_heap_size(),
              esp_timer_get_time() / 1000000LL);
     httpd_resp_set_type(req, "application/json");
@@ -323,13 +337,14 @@ static esp_err_t api_wifi_connect_handler(httpd_req_t *req) {
 
 static esp_err_t api_led_get_handler(httpd_req_t *req) {
     AUTH_CHECK(req);
-    uint8_t r = 0, g = 0, b = 0;
+    uint8_t r = 0, g = 0, b = 0, w = 0, brightness = 255;
     bool on = false;
-    led_get_state(&r, &g, &b, &on);
+    led_get_state(&r, &g, &b, &w, &brightness, &on);
 
-    char buf[64];
-    snprintf(buf, sizeof(buf), "{\"r\":%d,\"g\":%d,\"b\":%d,\"on\":%s}",
-             r, g, b, on ? "true" : "false");
+    char buf[96];
+    snprintf(buf, sizeof(buf),
+             "{\"r\":%d,\"g\":%d,\"b\":%d,\"w\":%d,\"brightness\":%d,\"on\":%s}",
+             r, g, b, w, brightness, on ? "true" : "false");
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, buf);
     return ESP_OK;
@@ -344,6 +359,10 @@ static esp_err_t api_led_post_handler(httpd_req_t *req) {
     free(body);
     if (!root) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, NULL); return ESP_OK; }
 
+    cJSON *br_item = cJSON_GetObjectItem(root, "brightness");
+    if (cJSON_IsNumber(br_item))
+        led_set_brightness((uint8_t)br_item->valueint);
+
     cJSON *on_item = cJSON_GetObjectItem(root, "on");
     if (on_item && cJSON_IsBool(on_item) && !cJSON_IsTrue(on_item)) {
         led_set_off();
@@ -351,11 +370,60 @@ static esp_err_t api_led_post_handler(httpd_req_t *req) {
         cJSON *r = cJSON_GetObjectItem(root, "r");
         cJSON *g = cJSON_GetObjectItem(root, "g");
         cJSON *b = cJSON_GetObjectItem(root, "b");
+        cJSON *w = cJSON_GetObjectItem(root, "w");
         if (cJSON_IsNumber(r) && cJSON_IsNumber(g) && cJSON_IsNumber(b)) {
-            led_set_rgb((uint8_t)r->valueint, (uint8_t)g->valueint, (uint8_t)b->valueint);
+            uint8_t wv = cJSON_IsNumber(w) ? (uint8_t)w->valueint : 0;
+            led_set_rgbw((uint8_t)r->valueint, (uint8_t)g->valueint, (uint8_t)b->valueint, wv);
         }
     }
     cJSON_Delete(root);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{}");
+    return ESP_OK;
+}
+
+/* ── API: /api/led/config ─────────────────────────────────────────────── */
+
+static esp_err_t api_led_config_get_handler(httpd_req_t *req) {
+    AUTH_CHECK(req);
+    uint32_t gpio = 48, count = 1;
+    char proto[8] = "GRB";
+    config_get_u32("led_gpio",  &gpio);
+    config_get_u32("led_count", &count);
+    config_get_str("led_proto", proto, sizeof(proto));
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "gpio",  (double)gpio);
+    cJSON_AddNumberToObject(root, "count", (double)count);
+    cJSON_AddStringToObject(root, "proto", proto);
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, json);
+    free(json);
+    return ESP_OK;
+}
+
+static esp_err_t api_led_config_post_handler(httpd_req_t *req) {
+    AUTH_CHECK(req);
+    char *body = recv_body(req, 128);
+    if (!body) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, NULL); return ESP_OK; }
+
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!root) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, NULL); return ESP_OK; }
+
+    cJSON *v;
+    if ((v = cJSON_GetObjectItem(root, "gpio"))  && cJSON_IsNumber(v))
+        config_set_u32("led_gpio",  (uint32_t)v->valueint);
+    if ((v = cJSON_GetObjectItem(root, "count")) && cJSON_IsNumber(v))
+        config_set_u32("led_count", (uint32_t)v->valueint);
+    if ((v = cJSON_GetObjectItem(root, "proto")) && cJSON_IsString(v))
+        config_set_str("led_proto", v->valuestring);
+    cJSON_Delete(root);
+
+    led_controller_reinit();
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{}");
@@ -378,9 +446,10 @@ esp_err_t web_server_init(void) {
 esp_err_t web_server_start(void) {
     if (s_server) return ESP_OK;
 
-    httpd_config_t cfg   = HTTPD_DEFAULT_CONFIG();
-    cfg.max_open_sockets = 7;
-    cfg.uri_match_fn     = httpd_uri_match_wildcard;
+    httpd_config_t cfg    = HTTPD_DEFAULT_CONFIG();
+    cfg.max_open_sockets  = 7;
+    cfg.max_uri_handlers  = 16;
+    cfg.uri_match_fn      = httpd_uri_match_wildcard;
 
     esp_err_t ret = httpd_start(&s_server, &cfg);
     if (ret != ESP_OK) {
@@ -400,6 +469,8 @@ esp_err_t web_server_start(void) {
         { .uri = "/api/wifi/connect",  .method = HTTP_POST,   .handler = api_wifi_connect_handler      },
         { .uri = "/api/led",           .method = HTTP_GET,    .handler = api_led_get_handler           },
         { .uri = "/api/led",           .method = HTTP_POST,   .handler = api_led_post_handler          },
+        { .uri = "/api/led/config",    .method = HTTP_GET,    .handler = api_led_config_get_handler    },
+        { .uri = "/api/led/config",    .method = HTTP_POST,   .handler = api_led_config_post_handler   },
         { .uri = "/",                  .method = HTTP_GET,    .handler = static_handler                },
         { .uri = "/*",                 .method = HTTP_GET,    .handler = static_handler                },
     };

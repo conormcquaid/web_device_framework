@@ -10,10 +10,8 @@
 <body>
   <nav class="container-fluid">
     <ul>
-      <li><strong id="nav-title">ESP32 Device</strong></li>
-    </ul>
-    <ul>
       <li><button id="burger" class="outline" aria-label="Menu">☰</button></li>
+      <li><strong id="nav-title">ESP32 Device</strong></li>
     </ul>
   </nav>
 
@@ -22,6 +20,7 @@
     <ul>
       <li><a href="#" data-page="home">Home</a></li>
       <li><a href="#" data-page="wifi">WiFi Config</a></li>
+      <li><a href="#" data-page="led-config">LED Config</a></li>
     </ul>
   </aside>
 
@@ -38,6 +37,14 @@
           <label>
             Colour
             <input type="color" id="led-color" value="#000000">
+          </label>
+          <label id="led-w-label" class="hidden">
+            White <span id="led-w-value">0</span>
+            <input type="range" id="led-w" min="0" max="255" value="0">
+          </label>
+          <label>
+            Brightness <span id="led-brightness-value">255</span>
+            <input type="range" id="led-brightness" min="0" max="255" value="255">
           </label>
           <button id="led-toggle" class="outline">Turn On</button>
         </div>
@@ -70,6 +77,36 @@
       </article>
 
       <button id="wifi-connect-btn" class="outline">Connect Now</button>
+    </section>
+
+    <section id="page-led-config" class="hidden">
+      <hgroup>
+        <h2>LED Config</h2>
+        <p>Hardware settings for the RGB LED strip</p>
+      </hgroup>
+
+      <article>
+        <form id="led-config-form">
+          <label>
+            GPIO Pin
+            <input type="number" id="led-gpio" min="0" max="48" required>
+          </label>
+          <label>
+            LED Count
+            <input type="number" id="led-count" min="1" max="512" required>
+          </label>
+          <label>
+            Protocol
+            <select id="led-proto">
+              <option value="GRB">GRB (WS2812)</option>
+              <option value="RGB">RGB</option>
+              <option value="GRBW">GRBW (SK6812)</option>
+              <option value="RGBW">RGBW (SK6812)</option>
+            </select>
+          </label>
+          <button type="submit">Save &amp; Apply</button>
+        </form>
+      </article>
     </section>
   </main>
 

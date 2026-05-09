@@ -14,6 +14,13 @@ static void set_default_str(const char *key, const char *val) {
     }
 }
 
+static void set_default_u32(const char *key, uint32_t val) {
+    uint32_t tmp;
+    if (nvs_get_u32(s_nvs, key, &tmp) == ESP_ERR_NVS_NOT_FOUND) {
+        nvs_set_u32(s_nvs, key, val);
+    }
+}
+
 esp_err_t config_manager_init(void) {
     esp_err_t ret = nvs_open("cfg", NVS_READWRITE, &s_nvs);
     if (ret != ESP_OK) {
@@ -23,6 +30,10 @@ esp_err_t config_manager_init(void) {
     set_default_str("device_name", "esp32-device");
     set_default_str("http_user",   "admin");
     set_default_str("http_pass",   "admin");
+    set_default_u32("led_gpio",       48);
+    set_default_u32("led_count",      1);
+    set_default_str("led_proto",      "GRB");
+    set_default_u32("led_brightness", 255);
     nvs_commit(s_nvs);
     return ESP_OK;
 }

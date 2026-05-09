@@ -389,9 +389,9 @@ dependencies:
 1. `idf_component.yml` files declare `joltwallet/esp_littlefs` (web_server), `espressif/mdns` (main). First `idf.py build` fetches managed components automatically.
 2. `idf.py set-target esp32s3 && idf.py build` — should compile cleanly.
 3. Flash firmware + LittleFS image.
-4. **AP always up:** connect to `esp32-device-XXXXXX` → `http://192.168.4.1` or `http://esp32-device.local` → dashboard loads.
-5. **mDNS:** from a connected client `ping esp32-device.local` resolves to device IP.
-6. **WiFi page:** add a credential → "Connect Now" → device scans → connects → IP shown in status bar; AP still reachable; `esp32-device.local` resolves on STA network too.
-7. **Multi-cred test:** store two SSIDs — device connects to the one with stronger RSSI.
-8. **Auth test:** curl without `Authorization` → 401; with `admin:admin` → 200.
-9. **WebSocket test:** open browser console, verify WS connected; `event_bus_post` from a test task → JSON frame appears in dashboard event log.
+   1. **AP always up:** connect to `esp32-device-XXXXXX` → `http://192.168.4.1` or `http://esp32-device.local` → dashboard loads.
+4. **mDNS:** from a connected client `ping esp32-device.local` resolves to device IP.
+5. **WiFi page:** add a credential → "Connect Now" → device scans → connects → IP shown in status bar; AP still reachable; `esp32-device.local` resolves on STA network too.
+6. **Multi-cred test:** store two SSIDs — device connects to the one with stronger RSSI.
+7. **Auth test:** curl without `Authorization` → 401; with `admin:admin` → 200.
+8. **WebSocket test:** open browser console, verify WS connected; `event_bus_post` from a test task → JSON frame appears in dashboard event log.
