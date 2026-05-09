@@ -8,7 +8,11 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
+#include "freertos/task.h"
+#include "lwip/sockets.h"
+#include "lwip/inet.h"
 #include <string.h>
+#include <errno.h>
 
 static const char *TAG = "wifi_manager";
 
@@ -140,6 +144,58 @@ static void on_reconnect_event(const char *event, const char *json, void *ctx) {
     esp_wifi_scan_start(NULL, false);
 }
 
+/* ── DNS captive portal ───────────────────────────────────────────────── */
+
+static void dns_captive_task(void *arg) {
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "DNS socket failed: %d", errno);
+        vTaskDelete(NULL);
+        return;
+    }
+    int opt = 1;
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    struct sockaddr_in addr = {
+        .sin_family      = AF_INET,
+        .sin_port        = htons(53),
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+    };
+    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        ESP_LOGE(TAG, "DNS bind failed: %d", errno);
+        close(sock);
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGI(TAG, "DNS captive portal listening on port 53");
+
+    uint8_t buf[512], resp[512];
+    while (1) {
+        struct sockaddr_in client;
+        socklen_t clen = sizeof(client);
+        int n = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&client, &clen);
+        if (n < 12) continue;
+
+        memcpy(resp, buf, n);
+        resp[2] = 0x81;          /* QR=1 opcode=0 AA=1 TC=0 RD=1 */
+        resp[3] = 0x80;          /* RA=1 RCODE=0                  */
+        resp[6] = 0x00; resp[7] = 0x01;  /* ANCOUNT = 1           */
+
+        int rlen = n;
+        if (rlen + 16 <= (int)sizeof(resp)) {
+            resp[rlen++] = 0xC0; resp[rlen++] = 0x0C; /* ptr → qname  */
+            resp[rlen++] = 0x00; resp[rlen++] = 0x01; /* TYPE  A      */
+            resp[rlen++] = 0x00; resp[rlen++] = 0x01; /* CLASS IN     */
+            resp[rlen++] = 0x00; resp[rlen++] = 0x00;
+            resp[rlen++] = 0x00; resp[rlen++] = 0x3C; /* TTL 60 s     */
+            resp[rlen++] = 0x00; resp[rlen++] = 0x04; /* RDLENGTH 4   */
+            resp[rlen++] = 192;  resp[rlen++] = 168;
+            resp[rlen++] = 4;    resp[rlen++] = 1;    /* 192.168.4.1  */
+            sendto(sock, resp, rlen, 0, (struct sockaddr *)&client, clen);
+        }
+    }
+}
+
 esp_err_t wifi_manager_init(wifi_state_cb_t callback) {
     s_callback = callback;
 
@@ -182,6 +238,7 @@ esp_err_t wifi_manager_start(void) {
     ESP_ERROR_CHECK(esp_wifi_start());
 
     ESP_LOGI(TAG, "AP started: SSID '%s'", ap_ssid);
+    xTaskCreate(dns_captive_task, "dns_captive", 4096, NULL, 5, NULL);
     set_state(WIFI_STATE_AP_MODE);
     web_server_start();
 

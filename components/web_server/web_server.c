@@ -126,31 +126,54 @@ static void log_probe(httpd_req_t *req) {
         }
     }
 
-    char ua[128]  = ""; httpd_req_get_hdr_value_str(req, "User-Agent", ua,   sizeof(ua));
-    char host[64] = ""; httpd_req_get_hdr_value_str(req, "Host",       host, sizeof(host));
-    char ct[64]   = ""; httpd_req_get_hdr_value_str(req, "Content-Type", ct, sizeof(ct));
+    char ua[128]  = ""; httpd_req_get_hdr_value_str(req, "User-Agent",   ua,   sizeof(ua));
+    char host[64] = ""; httpd_req_get_hdr_value_str(req, "Host",         host, sizeof(host));
+    char ct[64]   = ""; httpd_req_get_hdr_value_str(req, "Content-Type", ct,   sizeof(ct));
 
     ESP_LOGW(TAG, "PROBE %s %s | from=%s host=%s ua=%s ct=%s",
              method_name(req->method), req->uri, ip, host, ua, ct);
 
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "method", method_name(req->method));
-    cJSON_AddStringToObject(root, "uri",    req->uri);
-    cJSON_AddStringToObject(root, "ip",     ip);
-    cJSON_AddStringToObject(root, "host",   host);
-    cJSON_AddStringToObject(root, "ua",     ua);
-    if (ct[0]) cJSON_AddStringToObject(root, "ct", ct);
-    char *json = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (json) {
-        event_bus_post("probe", json);
-        free(json);
+    /* Build WS envelope and drop directly onto the queue — do NOT call
+       event_bus_post() here. Routing through the event bus eventually calls
+       httpd_ws_send_frame_async → httpd_queue_work, which re-enters the httpd
+       from within an httpd handler and can stall active connections. */
+    cJSON *data = cJSON_CreateObject();
+    cJSON_AddStringToObject(data, "method", method_name(req->method));
+    cJSON_AddStringToObject(data, "uri",    req->uri);
+    cJSON_AddStringToObject(data, "ip",     ip);
+    cJSON_AddStringToObject(data, "host",   host);
+    cJSON_AddStringToObject(data, "ua",     ua);
+    if (ct[0]) cJSON_AddStringToObject(data, "ct", ct);
+    char *data_str = cJSON_PrintUnformatted(data);
+    cJSON_Delete(data);
+    if (!data_str) return;
+
+    size_t msg_len = strlen(data_str) + 32;
+    char *msg = malloc(msg_len);
+    if (msg) {
+        snprintf(msg, msg_len, "{\"event\":\"probe\",\"data\":%s}", data_str);
+        if (xQueueSend(s_ws_queue, &msg, 0) != pdTRUE) free(msg);
     }
+    free(data_str);
 }
 
 static esp_err_t err_probe_handler(httpd_req_t *req, httpd_err_code_t err) {
+    /* Send the response first, then log — socket remains valid for getpeername
+       but the httpd is no longer mid-transaction when we touch the queue. */
+    httpd_err_code_t resp_err = (err == HTTPD_405_METHOD_NOT_ALLOWED)
+                                ? HTTPD_405_METHOD_NOT_ALLOWED
+                                : HTTPD_404_NOT_FOUND;
+    httpd_resp_send_err(req, resp_err, NULL);
     log_probe(req);
-    httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, NULL);
+    return ESP_OK;
+}
+
+/* ── Captive portal handlers (no auth — OS probe URLs) ───────────────── */
+
+static esp_err_t captive_portal_handler(httpd_req_t *req) {
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+    httpd_resp_send(req, NULL, 0);
     return ESP_OK;
 }
 
@@ -166,8 +189,8 @@ static esp_err_t static_handler(httpd_req_t *req) {
 
     FILE *f = fopen(fpath, "r");
     if (!f) {
-        log_probe(req);
         httpd_resp_send_404(req);
+        log_probe(req);
         return ESP_OK;
     }
     httpd_resp_set_type(req, mime_for(fpath));
@@ -506,7 +529,7 @@ esp_err_t web_server_start(void) {
 
     httpd_config_t cfg    = HTTPD_DEFAULT_CONFIG();
     cfg.max_open_sockets  = 7;
-    cfg.max_uri_handlers  = 16;
+    cfg.max_uri_handlers  = 24;
     cfg.uri_match_fn      = httpd_uri_match_wildcard;
 
     esp_err_t ret = httpd_start(&s_server, &cfg);
@@ -515,7 +538,21 @@ esp_err_t web_server_start(void) {
         return ret;
     }
 
-    /* Register handlers — specific routes before the catch-all */
+    /* Register handlers — specific routes before the catch-all.
+       Captive portal probes come first and require no auth. */
+    static const httpd_uri_t captive_routes[] = {
+        { .uri = "/generate_204",                   .method = HTTP_GET, .handler = captive_portal_handler },
+        { .uri = "/hotspot-detect.html",            .method = HTTP_GET, .handler = captive_portal_handler },
+        { .uri = "/library/test/success.html",      .method = HTTP_GET, .handler = captive_portal_handler },
+        { .uri = "/ncsi.txt",                       .method = HTTP_GET, .handler = captive_portal_handler },
+        { .uri = "/connecttest.txt",                .method = HTTP_GET, .handler = captive_portal_handler },
+        { .uri = "/redirect",                       .method = HTTP_GET, .handler = captive_portal_handler },
+        { .uri = "/canonical.html",                 .method = HTTP_GET, .handler = captive_portal_handler },
+    };
+    for (size_t i = 0; i < sizeof(captive_routes) / sizeof(captive_routes[0]); i++) {
+        httpd_register_uri_handler(s_server, &captive_routes[i]);
+    }
+
     static const httpd_uri_t routes[] = {
         { .uri = "/ws",                .method = HTTP_GET,    .handler = ws_handler,                   .is_websocket = true },
         { .uri = "/api/info",          .method = HTTP_GET,    .handler = api_info_handler              },
