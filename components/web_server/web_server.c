@@ -12,6 +12,8 @@
 #include "freertos/task.h"
 #include "mbedtls/base64.h"
 #include "cJSON.h"
+#include "lwip/sockets.h"
+#include "lwip/inet.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,6 +98,62 @@ static char *recv_body(httpd_req_t *req, int max) {
     return buf;
 }
 
+/* ── Probe logger ─────────────────────────────────────────────────────── */
+
+static const char *method_name(int m) {
+    switch (m) {
+        case HTTP_GET:     return "GET";
+        case HTTP_POST:    return "POST";
+        case HTTP_PUT:     return "PUT";
+        case HTTP_DELETE:  return "DELETE";
+        case HTTP_PATCH:   return "PATCH";
+        case HTTP_HEAD:    return "HEAD";
+        case HTTP_OPTIONS: return "OPTIONS";
+        default:           return "UNKNOWN";
+    }
+}
+
+static void log_probe(httpd_req_t *req) {
+    char ip[48] = "?";
+    int fd = httpd_req_to_sockfd(req);
+    struct sockaddr_storage addr = {0};
+    socklen_t addr_len = sizeof(addr);
+    if (getpeername(fd, (struct sockaddr *)&addr, &addr_len) == 0) {
+        if (addr.ss_family == AF_INET) {
+            inet_ntop(AF_INET,  &((struct sockaddr_in  *)&addr)->sin_addr,  ip, sizeof(ip));
+        } else {
+            inet_ntop(AF_INET6, &((struct sockaddr_in6 *)&addr)->sin6_addr, ip, sizeof(ip));
+        }
+    }
+
+    char ua[128]  = ""; httpd_req_get_hdr_value_str(req, "User-Agent", ua,   sizeof(ua));
+    char host[64] = ""; httpd_req_get_hdr_value_str(req, "Host",       host, sizeof(host));
+    char ct[64]   = ""; httpd_req_get_hdr_value_str(req, "Content-Type", ct, sizeof(ct));
+
+    ESP_LOGW(TAG, "PROBE %s %s | from=%s host=%s ua=%s ct=%s",
+             method_name(req->method), req->uri, ip, host, ua, ct);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "method", method_name(req->method));
+    cJSON_AddStringToObject(root, "uri",    req->uri);
+    cJSON_AddStringToObject(root, "ip",     ip);
+    cJSON_AddStringToObject(root, "host",   host);
+    cJSON_AddStringToObject(root, "ua",     ua);
+    if (ct[0]) cJSON_AddStringToObject(root, "ct", ct);
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (json) {
+        event_bus_post("probe", json);
+        free(json);
+    }
+}
+
+static esp_err_t err_probe_handler(httpd_req_t *req, httpd_err_code_t err) {
+    log_probe(req);
+    httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, NULL);
+    return ESP_OK;
+}
+
 /* ── Static file handler (wildcard) ──────────────────────────────────── */
 
 static esp_err_t static_handler(httpd_req_t *req) {
@@ -108,7 +166,7 @@ static esp_err_t static_handler(httpd_req_t *req) {
 
     FILE *f = fopen(fpath, "r");
     if (!f) {
-        ESP_LOGW(TAG, "404: %s", fpath);
+        log_probe(req);
         httpd_resp_send_404(req);
         return ESP_OK;
     }
@@ -477,6 +535,9 @@ esp_err_t web_server_start(void) {
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
         httpd_register_uri_handler(s_server, &routes[i]);
     }
+
+    httpd_register_err_handler(s_server, HTTPD_404_NOT_FOUND,          err_probe_handler);
+    httpd_register_err_handler(s_server, HTTPD_405_METHOD_NOT_ALLOWED, err_probe_handler);
 
     ESP_LOGI(TAG, "HTTP server started");
     return ESP_OK;
