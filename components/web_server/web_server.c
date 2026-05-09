@@ -540,6 +540,7 @@ esp_err_t web_server_start(void) {
 
     httpd_config_t cfg    = HTTPD_DEFAULT_CONFIG();
     cfg.max_open_sockets  = 7;
+    cfg.lru_purge_enable  = true;   /* evict stale HTTP conns to admit WS */
     cfg.max_uri_handlers  = 24;
     cfg.uri_match_fn      = httpd_uri_match_wildcard;
 
