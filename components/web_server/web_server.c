@@ -95,14 +95,14 @@ static char *recv_body(httpd_req_t *req, int max) {
     return buf;
 }
 
-/* ── Static file handler (/*) ─────────────────────────────────────────── */
+/* ── Static file handler (wildcard) ──────────────────────────────────── */
 
 static esp_err_t static_handler(httpd_req_t *req) {
     AUTH_CHECK(req);
     const char *uri = req->uri;
     if (strcmp(uri, "/") == 0) uri = "/index.html";
 
-    char fpath[128];
+    char fpath[522]; /* "/littlefs" (9) + max URI (512) + null */
     snprintf(fpath, sizeof(fpath), "/littlefs%s", uri);
 
     FILE *f = fopen(fpath, "r");
@@ -153,8 +153,11 @@ static void ws_tx_task(void *arg) {
 
 static void on_event_bus(const char *event, const char *json_data, void *ctx) {
     char buf[640];
-    snprintf(buf, sizeof(buf), "{\"event\":\"%s\",\"data\":%s}",
-             event, json_data ? json_data : "null");
+    const char *data = json_data ? json_data : "null";
+    int n = snprintf(buf, sizeof(buf), "{\"event\":\"");
+    n += snprintf(buf + n, sizeof(buf) - (size_t)n, "%s", event);
+    n += snprintf(buf + n, sizeof(buf) - (size_t)n, "\",\"data\":");
+    snprintf(buf + n, sizeof(buf) - (size_t)n, "%s}", data);
     char *copy = strdup(buf);
     if (copy) {
         if (xQueueSend(s_ws_queue, &copy, pdMS_TO_TICKS(50)) != pdTRUE) {
@@ -397,6 +400,7 @@ esp_err_t web_server_start(void) {
         { .uri = "/api/wifi/connect",  .method = HTTP_POST,   .handler = api_wifi_connect_handler      },
         { .uri = "/api/led",           .method = HTTP_GET,    .handler = api_led_get_handler           },
         { .uri = "/api/led",           .method = HTTP_POST,   .handler = api_led_post_handler          },
+        { .uri = "/",                  .method = HTTP_GET,    .handler = static_handler                },
         { .uri = "/*",                 .method = HTTP_GET,    .handler = static_handler                },
     };
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {
